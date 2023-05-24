@@ -4,6 +4,7 @@
 #include <set>
 #include <vector>
 #include <iomanip>
+#include <fstream>
 
 struct Level{
     short ROW=0;
@@ -33,6 +34,7 @@ void generate_game(const Level level, const std::set<Position> &positions);
 void generate(const Level level, std::set<Position> &positions);
 void draw_box(const Level level,const std::vector<std::vector<char>> &gameValues, const std::set<Position> &bombPosition);
 void new_game();
+void open_game_file();
 _inline bool check(char ch){
     return ((ch >= '0') && (ch <= '9'));
 }
@@ -74,8 +76,10 @@ Level difficulty(const short level){
     return l;
 }
 void draw_box(const Level level,const std::vector<std::vector<char>> &gameValues, const std::set<Position> &bombPosition){
-    bool gameOver = false, firstTime = true;
+    bool gameOver = false, won = false;
     std::string box = "[ ]";
+    /*for(const auto &value: bombPosition) // little back door to know where the bombs are
+        std::cout << value << " ";*/
     std::cout << std::endl;
     for (int row = 0; row < level.ROW; ++row) {
         for (int column = 0; column < level.COLUMN; ++column) {
@@ -99,6 +103,7 @@ void draw_box(const Level level,const std::vector<std::vector<char>> &gameValues
         }
         std::cout << std::endl;
     }
+    auto startTime = std::chrono::steady_clock::now();
     Position xy{};
     short choice{};
     std::set<Position> flagged, revealed;
@@ -113,13 +118,52 @@ void draw_box(const Level level,const std::vector<std::vector<char>> &gameValues
         std::cout << "> ";
         std::cin >> choice;
         if(not (choice >= 1 && choice <= 4))
-            goto gamechoice;
+            //goto gamechoice;
         switch (choice){
             case 3:
                 new_game();
                 return;
                 break;
+        }
+        if(choice == 4){
+            std::ofstream outputFile("gameValues.txt");
+            if (!outputFile) {
+                std::cerr << "Failed to open output file: gameValues.txt" << std::endl;
+                return;
+            }
+            for (const std::vector<char>& row : gameValues) {
+                for (char element : row) {
+                    outputFile << element;
+                }
+                outputFile << '\n';
+            }
+            outputFile.close();
+            std::cout << "Vector saved to file: gameValues.txt" << std::endl;
 
+            outputFile.open("level.bin", std::ios::binary);
+            if (!outputFile) {
+                std::cerr << "Failed to open output file: level.bin" << std::endl;
+                return;
+            }
+            outputFile.write(reinterpret_cast<const char*>(&level), sizeof(level));// Write the structure to the file
+            outputFile.close();
+
+            std::cout << "Structure written to file: level.bin" << std::endl;
+
+            outputFile.open("bombPosition.txt");
+            if (!outputFile) {
+                std::cerr << "Failed to open output file: bombPosition.txt" << std::endl;
+                return;
+            }
+
+            for (const Position& pos : bombPosition) {
+                // Write each structure to the file
+                outputFile << pos.row << ' ' << pos.column << '\n';
+            }
+            outputFile.close();
+
+            std::cout << "Set written to file: bombPosition.txt" << std::endl;
+            break;
         }
         game_axis:
             std::cout << "Enter Position (xy separated by space): ";
@@ -156,6 +200,14 @@ void draw_box(const Level level,const std::vector<std::vector<char>> &gameValues
         }
         Position loop{};
         std::cout << std::endl;
+        if(flagged.size() == level.BOMBS){
+            if(flagged == bombPosition){
+                won = true;
+                goto win;
+            }
+
+        }
+
         for (int row = 0; row < level.ROW; ++row) {
             for (int column = 0; column < level.COLUMN; ++column) {
                 loop.row = row;
@@ -178,8 +230,14 @@ void draw_box(const Level level,const std::vector<std::vector<char>> &gameValues
                     std::cout << std::setw(3) << row << "| ";
 
                 if(gameOver){
-                    if (bombPosition.count(loop))
+                    if (bombPosition.count(loop)) // shows bombs because the game is over
                         box[1] = gameValues[row][column];
+                    for(auto it = flagged.begin(); it != flagged.end();){ // erase positions that are not bombs
+                        if (!bombPosition.count(*it))
+                            it = flagged.erase(it);
+                        else
+                            it++;
+                    }
                 }
                 if (revealed.count(loop))
                     box[1] = gameValues[row][column];
@@ -191,11 +249,69 @@ void draw_box(const Level level,const std::vector<std::vector<char>> &gameValues
             std::cout << std::endl;
         }
 
-        for (int row = 0; row < level.ROW; ++row) {
-            for (int column = 0; column < level.COLUMN; ++column) {
-
+        win:
+            if(won){
+                for (int row = 0; row < level.ROW; ++row) {
+                    for (int column = 0; column < level.COLUMN; ++column) {
+                        loop.row = row;
+                        loop.column = column;
+                        if (row == 0 && column == 0) {
+                            for (int column = 0; column < level.COLUMN; ++column) {
+                                if (column == 0)
+                                    std::cout << "    ";
+                                std::cout << std::setw(3) << column << ' ';
+                            }
+                            std::cout << std::endl;
+                            for (int column = 0; column < level.COLUMN; ++column) {
+                                if (column == 0)
+                                    std::cout << "    ";
+                                std::cout << std::setw(4) << "_ ";
+                            }
+                            std::cout << std::endl;
+                        }
+                        if (column == 0)
+                            std::cout << std::setw(3) << row << "| ";
+                        box[1] = gameValues[row][column];
+                        if (flagged.count(loop))
+                            box = "[B]";
+                        std::cout << std::setw(3) << box << ' ';
+                        box = "[ ]";
+                    }
+                    std::cout << std::endl;
+                }
             }
-        }
+            std::chrono::seconds elapsedTime;
+            if (gameOver || won) {
+                auto endTime = std::chrono::steady_clock::now();
+                elapsedTime = std::chrono::duration_cast<std::chrono::seconds>(endTime - startTime);
+                std::cout << "\nElapsed time: " << elapsedTime.count() << " seconds" << std::endl;
+            }
+                if (gameOver) {
+                    std::cout << "Game Over!" << std::endl;
+                }
+                if (won) {
+                    std::cout << "You Have Won!" << std::endl;
+                    std::string name{}, difficulty{}, line_from_file{};
+                    std::cout << "Enter Your Name: ";
+                    std::cin >> name;
+                    switch (level.BOMBS) {
+                        case 10:
+                            difficulty = "Easy";
+                            break;
+                        case 40:
+                            difficulty = "Medium";
+                            break;
+                        case 99:
+                            difficulty = "Hard";
+                            break;
+                    }
+                    std::ofstream out("Highscore.txt", std::ios::app);
+                    if (!out.fail()) {
+                        out << std::left << std::setw(10) << name << std::setw(10) << difficulty << elapsedTime.count() << " seconds\n";
+                    }
+                    break;
+                }
+
     }
 }
 void generate_game(const Level level, const std::set<Position> &positions){
@@ -335,14 +451,24 @@ void generate(const Level level, std::set<Position> &positions){ //Set that hold
 }
 short start_game(){
     short level{};
-    std::cout << "Welcome to Minesweeper!\n";
+    std::cout << "High Scores Of Previous Players!\n";
+    std::ifstream in("Highscore.txt");
+    if (!in.fail()) {
+        for (char ch;in.get(ch);)
+            std::cout << ch;
+    }
+
+    std::cout << "\nWelcome to Minesweeper!\n";
     Difficulty:
     std::cout << "\tChoose Difficulty:\n";
     std::cout << "\t\t1.Easy\n";
     std::cout << "\t\t2.Medium\n";
     std::cout << "\t\t3.Hard\n";
+    std::cout << "\n\t\t4.Continue\n";
     std::cout << "\t>> ";
     std::cin >> level;
+    if(level == 4)
+        open_game_file();
     if(not ((level >= 1) && (level <=3))){
         std::cout << "Invalid Difficulty!\n\n";
         goto Difficulty;
@@ -354,4 +480,60 @@ void new_game(){
     Level level = difficulty(start_game());
     generate(level, positions);
     generate_game(level, positions);
+}
+void open_game_file(){
+    std::vector<std::vector<char>> gameValues;
+    std::ifstream inputFile("gameValues.txt");
+    if (!inputFile) {
+        std::cerr << "Failed to open input file: gameValues.txt"<< std::endl;
+        return;
+    }
+
+    std::string line;
+    while (std::getline(inputFile, line)) {
+        std::vector<char> row;
+        for (char element : line) {
+            row.push_back(element);
+        }
+        gameValues.push_back(row);
+    }
+    inputFile.close();
+    std::cout << "Vector loaded from file: gameValues.txt"<< std::endl;
+
+    Level level;
+    inputFile.open("level.bin", std::ios::binary);
+    if (!inputFile) {
+        std::cerr << "Failed to open input file: level.bin"<< std::endl;
+        return;
+    }
+
+    // Read the structure from the file
+    inputFile.read(reinterpret_cast<char*>(&level), sizeof(level));
+    inputFile.close();
+
+    std::cout << "Structure read from file: level.bin" << std::endl;
+
+    std::set<Position> bombPositions;
+
+    inputFile.open("bombPosition.txt");
+    if (!inputFile) {
+        std::cerr << "Failed to open input file: bombPosition.txt" << std::endl;
+        return;
+    }
+
+    int row;
+    int column;
+    while (inputFile >> row >> column) {
+        // Create a Person structure from the file data
+        Position pos = {row, column};
+        // Add the structure to the set
+        bombPositions.insert(pos);
+    }
+
+    inputFile.close();
+
+    std::cout << "Set read from file: bombPosition.txt" << std::endl;
+    draw_box(level,gameValues, bombPositions);
+
+
 }
